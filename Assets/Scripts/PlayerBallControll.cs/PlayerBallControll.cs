@@ -3,47 +3,59 @@ using UnityEngine;
 public class PlayerBallControl : MonoBehaviour
 {
     [Header("References")]
-    public GameObject ball;          // žogo nastaviš v Inspectorju
-    public Transform holdPoint;      // točka, kjer jo držiš
+    public GameObject ball;
+    public Transform holdPoint;
 
     [Header("Pickup settings")]
-    public float pickUpDistance = 2.5f;  // koliko blizu mora biti player
-    public float pickUpCooldownTime = 0.3f; // čas po metu, ko je ne more takoj pobrati
+    public float pickUpDistance = 6.8f;
+    public float pickUpCooldownTime = 0.04f;
+    public float maxPickupBallSpeed = 18f;
 
     [Header("Throw settings")]
-    public float throwForceX = 6f;   // vodoravna sila meta
-    public float throwForceY = 10f;  // navpična sila meta
+    public float throwForceX = 6f;
+    public float throwForceY = 10f;
+    public KeyCode throwKey = KeyCode.Space;
+
+    private static PlayerBallControl currentBallOwner;
 
     private Rigidbody2D ballRb;
     private Collider2D ballCollider;
-    private bool holdingBall = false;
-    private float pickUpCooldown = 0f;
+    private bool holdingBall;
+    private float pickUpCooldown;
+
+    public bool IsHoldingBall => holdingBall;
 
     void Start()
     {
+        if (ball == null)
+            ball = GameObject.FindWithTag("Ball");
+
         if (ball != null)
         {
             ballRb = ball.GetComponent<Rigidbody2D>();
             ballCollider = ball.GetComponent<Collider2D>();
         }
-        else
-        {
-            Debug.LogWarning("PlayerBallControl: ball ni nastavljena v Inspectorju!");
-        }
 
         if (holdPoint == null)
-        {
-            Debug.LogWarning("PlayerBallControl: holdPoint ni nastavljen v Inspectorju!");
-        }
+            Debug.LogWarning("PlayerBallControl: holdPoint is not assigned in the Inspector.");
     }
 
     void Update()
     {
-        if (ball == null || holdPoint == null) return;
+        if (ball == null || holdPoint == null)
+            return;
 
-        // odštevanje cooldowna za pickup
         if (pickUpCooldown > 0f)
             pickUpCooldown -= Time.deltaTime;
+
+        bool canControl = GameManager.Instance == null || GameManager.Instance.CanPlayersControl();
+
+        if (!canControl)
+        {
+            if (holdingBall)
+                HoldBall();
+            return;
+        }
 
         if (!holdingBall)
         {
@@ -53,74 +65,157 @@ public class PlayerBallControl : MonoBehaviour
         {
             HoldBall();
 
-            // MET z ↑ ali W
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W))
-            {
+            if (Input.GetKeyDown(throwKey))
                 ThrowBall();
-            }
         }
     }
 
     void TryPickUpBall()
-{
-    if (pickUpCooldown > 0f) return;
-    if (ballRb == null) return;
-
-    float dist = Vector2.Distance(transform.position, ball.transform.position);
-
-    // lahko jo pobereš, če je dovolj blizu
-    // in ni prehitro (ampak ni treba, da je čisto mrtva)
-    if (dist <= pickUpDistance && ballRb.linearVelocity.magnitude < 2f)
     {
-        Debug.Log("Poberem žogo!");
-        holdingBall = true;
+        if (pickUpCooldown > 0f || ballRb == null)
+            return;
 
+        if (currentBallOwner != null && currentBallOwner != this && currentBallOwner.IsHoldingBall)
+            return;
+
+        Vector2 ballPosition = ball.transform.position;
+        Vector2 playerPosition = transform.position;
+        Vector2 holdPosition = holdPoint.position;
+        Vector2 colliderPoint = ballCollider != null ? ballCollider.ClosestPoint(holdPosition) : ballPosition;
+
+        float playerDistance = Vector2.Distance(playerPosition, ballPosition);
+        float handDistance = Vector2.Distance(holdPosition, colliderPoint);
+        float bodyDistance = Vector2.Distance(playerPosition, colliderPoint);
+        float distanceToBall = Mathf.Min(playerDistance, handDistance, bodyDistance);
+
+        if (distanceToBall > pickUpDistance)
+            return;
+
+        if (ballRb.linearVelocity.magnitude > maxPickupBallSpeed)
+            return;
+
+        holdingBall = true;
+        currentBallOwner = this;
         ballRb.bodyType = RigidbodyType2D.Kinematic;
+        ballRb.simulated = true;
         ballRb.linearVelocity = Vector2.zero;
         ballRb.angularVelocity = 0f;
 
         if (ballCollider != null)
             ballCollider.enabled = false;
-    }
-}
 
+        HoldBall();
+        pickUpCooldown = pickUpCooldownTime;
+    }
+
+    public bool TryPickUpBallExternal()
+    {
+        if (holdingBall)
+            return true;
+
+        bool wasHoldingBall = holdingBall;
+        TryPickUpBall();
+        return !wasHoldingBall && holdingBall;
+    }
 
     void HoldBall()
     {
-        // žoga sledi točki holdPoint
         ball.transform.position = holdPoint.position;
+        ball.transform.rotation = Quaternion.identity;
     }
 
-void ThrowBall()
-{
-    if (ballRb == null) return;
+    void ThrowBall()
+    {
+        if (ballRb == null)
+            return;
 
-    holdingBall = false;
+        holdingBall = false;
+        if (currentBallOwner == this)
+            currentBallOwner = null;
+        ballRb.bodyType = RigidbodyType2D.Dynamic;
+        ballRb.simulated = true;
 
-    // nazaj na fiziko
-    ballRb.bodyType = RigidbodyType2D.Dynamic;
+        if (ballCollider != null)
+            ballCollider.enabled = true;
 
-    if (ballCollider != null)
-        ballCollider.enabled = true;
+        float direction = transform.localScale.x >= 0f ? 1f : -1f;
 
-    float dir = transform.localScale.x >= 0 ? 1f : -1f;
+        ballRb.linearVelocity = Vector2.zero;
+        ballRb.angularVelocity = 0f;
+        ballRb.linearVelocity = new Vector2(direction * throwForceX, throwForceY);
 
-    // resetiraj staro hitrost pred metom
-    ballRb.linearVelocity = Vector2.zero;
-    ballRb.angularVelocity = 0f;
+        pickUpCooldown = pickUpCooldownTime;
+    }
 
-    // met v smer pogleda
-    ballRb.linearVelocity = new Vector2(dir * throwForceX, throwForceY);
+    public void ThrowBallExternal(float horizontalForce, float verticalForce)
+    {
+        if (ballRb == null || !holdingBall)
+            return;
 
-    pickUpCooldown = pickUpCooldownTime;
+        holdingBall = false;
+        if (currentBallOwner == this)
+            currentBallOwner = null;
+        ballRb.bodyType = RigidbodyType2D.Dynamic;
+        ballRb.simulated = true;
 
-    Debug.Log("Vržem žogo " + (dir > 0 ? "DESNO" : "LEVO") + "!");
-}
+        if (ballCollider != null)
+            ballCollider.enabled = true;
 
+        ballRb.linearVelocity = Vector2.zero;
+        ballRb.angularVelocity = 0f;
+        ballRb.linearVelocity = new Vector2(horizontalForce, verticalForce);
+
+        pickUpCooldown = pickUpCooldownTime;
+    }
+
+    public void ReleaseBall()
+    {
+        holdingBall = false;
+        if (currentBallOwner == this)
+            currentBallOwner = null;
+
+        if (ballRb != null)
+        {
+            ballRb.bodyType = RigidbodyType2D.Dynamic;
+            ballRb.simulated = true;
+        }
+
+        if (ballCollider != null)
+            ballCollider.enabled = true;
+    }
 
     void OnDrawGizmosSelected()
     {
+        Vector3 center = holdPoint != null ? holdPoint.position : transform.position;
         Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, pickUpDistance);
+        Gizmos.DrawWireSphere(center, pickUpDistance);
+    }
+
+    public void ForceHoldBall()
+    {
+        if (ball == null || holdPoint == null)
+            return;
+
+        if (ballRb == null)
+            ballRb = ball.GetComponent<Rigidbody2D>();
+
+        if (ballCollider == null)
+            ballCollider = ball.GetComponent<Collider2D>();
+
+        holdingBall = true;
+        currentBallOwner = this;
+
+        if (ballRb != null)
+        {
+            ballRb.bodyType = RigidbodyType2D.Kinematic;
+            ballRb.simulated = true;
+            ballRb.linearVelocity = Vector2.zero;
+            ballRb.angularVelocity = 0f;
+        }
+
+        if (ballCollider != null)
+            ballCollider.enabled = false;
+
+        HoldBall();
     }
 }

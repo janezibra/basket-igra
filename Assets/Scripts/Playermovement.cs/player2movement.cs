@@ -1,7 +1,7 @@
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody2D))]
-public class PlayerMovement : MonoBehaviour
+public class Player2Movement : MonoBehaviour
 {
     [Header("Movement")]
     public float moveSpeed = 16f;
@@ -10,19 +10,21 @@ public class PlayerMovement : MonoBehaviour
     public float airControl = 0.94f;
 
     [Header("Controls")]
-    public KeyCode leftKey = KeyCode.A;
-    public KeyCode rightKey = KeyCode.D;
-    public KeyCode jumpKey = KeyCode.W;
+    public KeyCode leftKey = KeyCode.LeftArrow;
+    public KeyCode rightKey = KeyCode.RightArrow;
+    public KeyCode jumpKey = KeyCode.UpArrow;
 
     private Rigidbody2D rb;
     private float inputX;
     private bool isGrounded;
     private Vector3 baseScale;
+    private SpriteRenderer spriteRenderer;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         baseScale = transform.localScale;
+        spriteRenderer = GetComponentInChildren<SpriteRenderer>();
     }
 
     void Update()
@@ -44,9 +46,17 @@ public class PlayerMovement : MonoBehaviour
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
 
         if (inputX > 0f)
-            transform.localScale = new Vector3(Mathf.Abs(baseScale.x), baseScale.y, baseScale.z);
+            FaceDirection(1f);
         else if (inputX < 0f)
-            transform.localScale = new Vector3(-Mathf.Abs(baseScale.x), baseScale.y, baseScale.z);
+            FaceDirection(-1f);
+    }
+
+    void FaceDirection(float direction)
+    {
+        transform.localScale = new Vector3(Mathf.Abs(baseScale.x) * Mathf.Sign(direction), Mathf.Abs(baseScale.y), Mathf.Abs(baseScale.z));
+
+        if (spriteRenderer != null)
+            spriteRenderer.flipX = direction < 0f;
     }
 
     void FixedUpdate()
